@@ -5,18 +5,33 @@
  */
 window.Components = window.Components || {};
 
+const USAGE_LOG_PAGE_SIZE = 100;
+const US_NUMBER_FORMAT = new Intl.NumberFormat('en-US');
+
 window.Components.usageLogViewer = () => ({
     records: [],
     search: '',
+    pageSize: USAGE_LOG_PAGE_SIZE,
+    displayLimit: USAGE_LOG_PAGE_SIZE,
     lastUpdated: 0,
     agoTick: 0,
+    _recordsFingerprint: '',
+    _recordCache: null,
     get filteredRecords() {
         const q = this.search.trim().toLowerCase();
         if (!q) return this.records;
         return this.records.filter(r =>
-            (r.model || '').toLowerCase().includes(q) ||
-            (r.apiKey || '').toLowerCase().includes(q)
+            r._searchKey
+                ? r._searchKey.includes(q)
+                : ((r.model || '').toLowerCase().includes(q) ||
+                   (r.apiKey || '').toLowerCase().includes(q))
         );
+    },
+    get visibleRecords() {
+        const list = this.filteredRecords;
+        return list.length > this.displayLimit
+            ? list.slice(0, this.displayLimit)
+            : list;
     },
     get filteredCredits() {
         return this.filteredRecords.reduce((sum, r) => sum + Number(r.credits || 0), 0);
@@ -26,11 +41,22 @@ window.Components.usageLogViewer = () => ({
     refreshTimer: null,
 
     init() {
-        this.refreshData();
+        this._recordCache = new Map();
+
+        if (Alpine.store('global')?.activeTab === 'usageLog') {
+            this.refreshData();
+        }
+
+        this.$watch('search', () => {
+            this.displayLimit = this.pageSize;
+        });
 
         // Refresh data whenever this tab becomes active
         this.$watch('$store.global.activeTab', (val) => {
-            if (val === 'usageLog') this.refreshData();
+            if (val === 'usageLog') {
+                this.displayLimit = this.pageSize;
+                requestAnimationFrame(() => this.refreshData());
+            }
         });
 
         // Follow global polling interval
@@ -38,12 +64,62 @@ window.Components.usageLogViewer = () => ({
         this.startAutoRefresh();
 
         // UpdatedAgo 心跳：每 30s 重渲染一次相对时间文案（kiro2cc UpdatedAgo 同机制）
-        this.agoTimer = setInterval(() => { this.agoTick++; }, 30000);
+        this.agoTimer = setInterval(() => {
+            if (Alpine.store('global')?.activeTab === 'usageLog') {
+                this.agoTick++;
+            }
+        }, 30000);
     },
 
     destroy() {
         if (this.agoTimer) clearInterval(this.agoTimer);
         if (this.refreshTimer) clearInterval(this.refreshTimer);
+    },
+
+    handleScroll(event) {
+        const el = event?.target;
+        if (!el) return;
+        if (el.scrollTop + el.clientHeight >= el.scrollHeight - 160) {
+            const total = this.filteredRecords.length;
+            if (this.displayLimit < total) {
+                this.displayLimit = Math.min(this.displayLimit + this.pageSize, total);
+            }
+        }
+    },
+
+    _normalizeRecords(rawRecords) {
+        if (!Array.isArray(rawRecords) || rawRecords.length === 0) {
+            this._recordCache?.clear();
+            return [];
+        }
+        if (!this._recordCache) this._recordCache = new Map();
+
+        const seenCounts = new Map();
+        const nextCache = new Map();
+        const result = new Array(rawRecords.length);
+
+        // Iterate oldest -> newest so occurrence indices stay stable when new records unshift at index 0
+        for (let i = rawRecords.length - 1; i >= 0; i--) {
+            const r = rawRecords[i];
+            const baseSig = `${r.timestamp || ''}|${r.model || ''}|${r.apiKey || ''}|${r.totalTokens || 0}|${r.totalDuration || 0}`;
+            const occ = (seenCounts.get(baseSig) || 0) + 1;
+            seenCounts.set(baseSig, occ);
+            const key = occ === 1 ? baseSig : `${baseSig}#${occ}`;
+
+            let item = this._recordCache.get(key);
+            if (!item) {
+                item = {
+                    ...r,
+                    _key: key,
+                    _searchKey: `${(r.model || '').toLowerCase()}\n${(r.apiKey || '').toLowerCase()}`,
+                };
+            }
+            nextCache.set(key, item);
+            result[i] = item;
+        }
+
+        this._recordCache = nextCache;
+        return result;
     },
 
     /**
@@ -68,7 +144,11 @@ window.Components.usageLogViewer = () => ({
         if (this.refreshTimer) clearInterval(this.refreshTimer);
         const interval = parseInt(Alpine.store('settings')?.refreshInterval || 60);
         if (interval > 0) {
-            this.refreshTimer = setInterval(() => this.refreshData(), interval * 1000);
+            this.refreshTimer = setInterval(() => {
+                if (Alpine.store('global')?.activeTab === 'usageLog') {
+                    this.refreshData();
+                }
+            }, interval * 1000);
         } else {
             this.refreshTimer = null;
         }
@@ -133,7 +213,17 @@ window.Components.usageLogViewer = () => ({
             if (resp.ok) {
                 const data = await resp.json();
                 if (data.status === 'ok') {
-                    this.records = data.records || [];
+                    const raw = Array.isArray(data.records) ? data.records : [];
+                    const first = raw[0];
+                    const last = raw[raw.length - 1];
+                    const fingerprint = raw.length === 0
+                        ? '0'
+                        : `${raw.length}:${first?.timestamp || ''}:${first?.totalTokens || 0}:${last?.timestamp || ''}:${last?.totalTokens || 0}`;
+
+                    if (fingerprint !== this._recordsFingerprint) {
+                        this._recordsFingerprint = fingerprint;
+                        this.records = this._normalizeRecords(raw);
+                    }
                     this.lastUpdated = Date.now();
                 }
             }
@@ -161,7 +251,7 @@ window.Components.usageLogViewer = () => ({
      */
     formatTokens(type, count) {
         const n = Number(count || 0);
-        const formatted = n.toLocaleString('en-US');
+        const formatted = US_NUMBER_FORMAT.format(n);
         const t = Alpine.store('global');
         switch (type) {
             case 'input':  return `${t.t('inputTokens')}：${formatted}`;

@@ -45,7 +45,7 @@
 
     <!-- Main Table（kiro2cc table-kit PANEL 规格） -->
     <section class="flex min-h-0 flex-col overflow-hidden rounded-[11px] border border-hairline bg-surface shadow-panel">
-        <div class="max-h-[70vh] min-h-0 overflow-y-auto">
+        <div class="max-h-[70vh] min-h-0 overflow-y-auto" @scroll.passive="handleScroll($event)">
             <table class="w-full border-collapse text-[12.5px]">
                 <thead>
                     <tr>
@@ -110,7 +110,7 @@
                         </tr>
                     </template>
                     <!-- Data Rows -->
-                    <template x-for="rec in filteredRecords" :key="rec.timestamp + '|' + (rec.model || '')">
+                    <template x-for="rec in visibleRecords" :key="rec._key">
                         <tr class="transition-colors hover:bg-surface-2">
                             <!-- Time -->
                             <td class="whitespace-nowrap border-b border-hairline px-3 py-[11px] align-middle text-[11.5px] text-ink-2"
