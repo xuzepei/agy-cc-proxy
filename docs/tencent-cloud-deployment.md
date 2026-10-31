@@ -55,20 +55,13 @@ sudo npm install -g pm2
 将代码部署至服务器应用目录并完成编译：
 
 ```bash
-# 1. 创建应用目录并设置权限
-sudo mkdir -p /opt/agy-cc-proxy
+# 1. 部署代码至 /opt 目录并设置所属权限
+cd /opt
+sudo git clone https://github.com/xuzepei/agy-cc-proxy.git
 sudo chown -R $USER:$USER /opt/agy-cc-proxy
 cd /opt/agy-cc-proxy
 
-# 2. 同步项目代码至服务器
-# 方式 A：通过 Git 直接克隆仓库（推荐）
-git clone https://github.com/xuzepei/agy-cc-proxy.git .
-# （若已配置 SSH Key 也可使用：git clone git@github.com:xuzepei/agy-cc-proxy.git .）
-
-# 方式 B：从本地通过 rsync 同步（排除本地 node_modules 与测试日志）
-# rsync -avz --exclude 'node_modules' --exclude '.git' --exclude 'logs' ./ ubuntu@43.173.115.129:/opt/agy-cc-proxy/
-
-# 3. 安装依赖（自动触发 Tailwind CSS 构建与 better-sqlite3 本地编译）
+# 2. 安装依赖（自动触发 Tailwind CSS 构建与 better-sqlite3 本地编译）
 npm install
 ```
 
@@ -201,7 +194,7 @@ pm2 restart agy-cc-proxy    # 重启服务
 
 ---
 
-## 8. Nginx 反向代理与 SSL 配置（生产推荐）
+## 8. Nginx 反向代理与 SSL 配置（生产推荐，不使用域名时可以跳过）
 
 避免直接将 Node.js 8088 端口裸露给公网，建议使用 Nginx 反代并关闭缓冲保证流式（SSE）响应流畅。
 
